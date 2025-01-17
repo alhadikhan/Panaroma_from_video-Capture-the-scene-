@@ -1,79 +1,59 @@
 import cv2
 import numpy as np
+import os
 
-# Function to create panorama from video
-def create_panorama_from_video(video_path, output_path, frame_skip=10):
-    # Open the video
+# Step 1: Extract frames from the video
+def extract_frames(video_path, output_dir, step=10):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Unable to open video.")
-        return
-    
-    # Initialize ORB detector and BFMatcher
-    orb = cv2.ORB_create()
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    frame_count = 0
+    extracted_count = 0
 
-    # Initialize variables for stitching
-    prev_frame = None
-    prev_kp = None
-    prev_des = None
-    panorama = None
-    
-    while True:
+    while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        
-        # Skip frames if needed
-        if cap.get(cv2.CAP_PROP_POS_FRAMES) % frame_skip != 0:
-            continue
-        
-        # Convert frame to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Detect ORB keypoints and descriptors
-        kp, des = orb.detectAndCompute(gray, None)
+        # Save every `step` frame
+        if frame_count % step == 0:
+            frame_path = os.path.join(output_dir, f"frame_{extracted_count:04d}.jpg")
+            cv2.imwrite(frame_path, frame)
+            extracted_count += 1
 
-        if prev_frame is not None:
-            # Match descriptors between the current and previous frames
-            matches = bf.match(des, prev_des)
-            matches = sorted(matches, key=lambda x: x.distance)
-            
-            # Extract matched keypoints
-            src_pts = np.float32([kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-            dst_pts = np.float32([prev_kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-            
-            # Find Homography matrix
-            M, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-            
-            # Stitch the current frame with the previous one using the Homography
-            h, w = frame.shape[:2]
-            panorama = cv2.warpPerspective(frame, M, (w*2, h))
-            panorama[0:h, 0:w] = prev_frame
-        
-        # Set the current frame as the previous frame for the next iteration
-        prev_frame = frame.copy()
-        prev_kp = kp
-        prev_des = des
+        frame_count += 1
 
-        # Display the current panorama (optional)
-        if panorama is not None:
-            cv2.imshow("Panorama", panorama)
-        
-        # Wait for a key press (optional)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    
-    # Save the panorama image
-    if panorama is not None:
+    cap.release()
+    print(f"Extracted {extracted_count} frames to {output_dir}")
+
+# Step 2: Stitch frames into a panorama
+def create_panorama(frames_dir, output_path):
+    # Load all frames from the directory
+    frame_files = sorted([os.path.join(frames_dir, f) for f in os.listdir(frames_dir) if f.endswith(".jpg")])
+
+    # Initialize the OpenCV Stitcher
+    stitcher = cv2.Stitcher_create()
+
+    # Read all frames
+    frames = [cv2.imread(f) for f in frame_files]
+
+    # Stitch frames together
+    status, panorama = stitcher.stitch(frames)
+
+    if status == cv2.Stitcher_OK:
         cv2.imwrite(output_path, panorama)
         print(f"Panorama saved to {output_path}")
-    
-    # Release video capture object and close windows
-    cap.release()
-    cv2.destroyAllWindows()
+    else:
+        print(f"Error during stitching: {status}")
 
-# Example usage
-video_path = 'E:/Capture The Scene/video.mp4'
-output_path = 'E:/Capture The Scene/output_panorama.jpg'
-create_panorama_from_video(video_path, output_path)
+# Define paths
+video_path = "video.mp4"  # Replace with your uploaded video path
+frames_dir = "frames"
+panorama_path = "panorama.jpg"
+
+# Extract frames from the video
+extract_frames(video_path, frames_dir, step=10)
+
+# Create a panorama from the extracted frames
+create_panorama(frames_dir, panorama_path)
